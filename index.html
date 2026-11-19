@@ -209,6 +209,22 @@ button,input,select{font:inherit;color:inherit}
 .sheet-in{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;width:min(640px,100%);display:grid;gap:10px}
 .sheet-in h2{margin:0;font:600 16px var(--font-head);letter-spacing:.02em}
 .sheet textarea{width:100%;height:220px;font:12px/1.4 var(--font-num);padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);resize:vertical}
+.help-in{width:min(720px,100%);max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px);overflow:auto;gap:18px;padding:20px 22px 22px}
+.help-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.help-in h2{margin:0;font:700 19px/1.2 var(--font-head);letter-spacing:.04em;text-transform:uppercase;text-wrap:balance}
+.lede{margin:6px 0 0;color:var(--muted);font-size:13px;max-width:62ch}
+.steps{list-style:none;margin:0;padding:0;display:grid;gap:18px;counter-reset:step}
+.steps > li{display:grid;grid-template-columns:28px minmax(0,1fr);column-gap:12px;row-gap:6px}
+.steps > li::before{
+  counter-increment:step;content:counter(step);grid-column:1;grid-row:1 / span 2;align-self:start;
+  width:28px;height:28px;border-radius:50%;background:var(--fg);color:var(--bg);display:grid;place-items:center;font:600 14px/1 var(--font-head)
+}
+.steps > li > *{grid-column:2}
+.steps h3{margin:4px 0 0;font:600 15px/1.2 var(--font-head);letter-spacing:.02em}
+.steps ul{margin:0;padding-left:18px;display:grid;gap:6px;font-size:13px;line-height:1.5;max-width:68ch}
+.steps b{font-weight:600}
+.help-in kbd{font:500 11px/1.4 var(--font-num);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 4px;background:var(--bg);white-space:nowrap}
+.formula{margin:2px 0 0;font:500 12.5px/1.4 var(--font-num);background:var(--chip);border-radius:6px;padding:8px 10px;max-width:max-content}
 
 @media (max-width: 900px){
   html,body{height:auto}
@@ -259,6 +275,7 @@ button,input,select{font:inherit;color:inherit}
 
     <label class="check" for="tagsT"><input type="checkbox" id="tagsT" checked> Tags</label>
     <span class="spacer"></span>
+    <button type="button" class="btn" id="helpBtn" title="How to use (?)">How to use</button>
     <button type="button" class="btn primary" id="openBtn">Open screenshots</button>
     <input type="file" id="file" accept="image/*" multiple hidden>
   </header>
@@ -269,6 +286,7 @@ button,input,select{font:inherit;color:inherit}
     <canvas id="cv" aria-label="Screenshot with ad shapes"></canvas>
     <div class="example" id="exampleNote" hidden>
       <span><strong>Example frame.</strong> The sponsors here are made up. Open or paste (Ctrl+V) a screenshot to measure your own.</span>
+      <button type="button" class="btn sm" id="exampleHelp">How to use</button>
       <button type="button" class="btn sm primary" id="exampleOpen">Open screenshot</button>
     </div>
     <div class="empty" id="empty" hidden>
@@ -298,6 +316,7 @@ button,input,select{font:inherit;color:inherit}
       <div class="big"><span id="totPct">0.00</span><span class="unit">%</span></div>
       <div class="bar" aria-hidden="true"><i id="totBar" style="width:0%"></i></div>
       <div class="sub mono" id="totPx">0 px</div>
+      <p class="note">This is the screenshot's exposure figure: the share of the frame that all ads cover together.</p>
       <p class="note" id="overlapNote" hidden></p>
     </section>
 
@@ -309,7 +328,7 @@ button,input,select{font:inherit;color:inherit}
         <input id="addLabel" type="text" placeholder="Add a sponsor" aria-label="New sponsor name" autocomplete="off">
         <button class="btn sm" type="submit">Add</button>
       </form>
-      <p class="note">New shapes go to the highlighted sponsor. Double-click a name to rename it.</p>
+      <p class="note">Share is each sponsor's exposure in this screenshot. New shapes go to the highlighted sponsor. Double-click a name to rename it.</p>
     </section>
 
     <section class="sec" id="secSel" hidden>
@@ -361,6 +380,7 @@ button,input,select{font:inherit;color:inherit}
         <dt>Space + drag</dt><dd>Pan. Wheel zooms, 0 fits, 1 is 100%</dd>
         <dt>Ctrl + V</dt><dd>Paste a screenshot</dd>
         <dt>T</dt><dd>Show or hide tags</dd>
+        <dt>?</dt><dd>How to use</dd>
       </dl>
     </section>
   </aside>
@@ -373,6 +393,49 @@ button,input,select{font:inherit;color:inherit}
     <p class="note">This view blocked automatic copying. The text is selected: press Ctrl+C, then paste into your sheet.</p>
     <textarea id="copyText" readonly aria-label="Table text"></textarea>
     <div class="row"><button type="button" class="btn" id="copyClose">Close</button></div>
+  </div>
+</div>
+<div class="sheet" id="helpPanel" hidden>
+  <div class="sheet-in help-in" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+    <div class="help-head">
+      <div>
+        <h2 id="helpTitle">How to measure ad exposure</h2>
+        <p class="lede">Exposure here means share of screen: how much of the picture an ad covers in a single frame. Take a screenshot of the moment, mark each ad, and read the share from the panel on the right.</p>
+      </div>
+      <button type="button" class="btn icon" id="helpClose" aria-label="Close">×</button>
+    </div>
+    <ol class="steps">
+      <li>
+        <h3>Get a screenshot</h3>
+        <ul>
+          <li><b>From a recording:</b> pause on the frame and export a still at full size. In Premiere Pro, use Export Frame (the camera button under the Program monitor). In VLC, use Video › Take Snapshot, which saves to your Pictures folder. Either way the still keeps the broadcast size, such as 1920 × 1080.</li>
+          <li><b>From a live stream or web player:</b> press <kbd>Win</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> on Windows or <kbd>Cmd</kbd>+<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>4</kbd> on a Mac, select the picture, then paste it here with <kbd>Ctrl</kbd>+<kbd>V</kbd>. If the capture includes player controls or the page around the video, use <b>Frame</b> (<kbd>F</kbd>) to drag around just the picture so the rest isn't counted.</li>
+          <li><b>Load it:</b> click Open screenshots, drag files onto the page, or paste. Load several to measure a whole set in one go.</li>
+        </ul>
+      </li>
+      <li>
+        <h3>Mark each ad</h3>
+        <ul>
+          <li>Under <b>By sponsor</b>, add the sponsor's name or click an existing one. New shapes go to the highlighted sponsor.</li>
+          <li><b>Box</b> (<kbd>B</kbd>): drag around a flat, square-on ad such as an LED board or an on-screen graphic.</li>
+          <li><b>Polygon</b> (<kbd>P</kbd>): click around an angled ad such as a floor logo, then press <kbd>Enter</kbd> or click the first point to close it.</li>
+          <li>Trace only the part you can see. If a player covers part of a board, leave that part out, for example with a box on either side. Where shapes overlap, the shared area is counted once.</li>
+          <li>To adjust a shape, drag it or its handles, nudge it with the arrow keys, or type exact numbers under <b>Selected shape</b>.</li>
+        </ul>
+      </li>
+      <li>
+        <h3>Read the exposure</h3>
+        <ul>
+          <li><b>Total ad coverage</b>, top right: the share of the frame that all ads cover together. This is the screenshot's exposure figure.</li>
+          <li><b>By sponsor › Share</b>: each sponsor's exposure in this screenshot. <b>Pixels</b> is the same area as a pixel count.</li>
+          <li>The tag on each shape shows that shape's share, and each thumbnail shows its screenshot's total.</li>
+          <li><b>Copy table</b> pastes into Sheets or Excel with one row per sponsor per screenshot plus an All ads row. <b>Download CSV</b> saves the same table, and <b>Annotated PNG</b> saves the screenshot with the shapes and percentages drawn on it.</li>
+          <li>Percentages don't depend on the screenshot's size. If you need pixel counts at broadcast size, set <b>Count pixels at</b> to 1920 × 1080.</li>
+        </ul>
+        <p class="formula">Share of screen = ad pixels ÷ frame pixels × 100</p>
+      </li>
+    </ol>
+    <div class="row"><button type="button" class="btn primary" id="helpDone">Start measuring</button></div>
   </div>
 </div>
 
@@ -823,7 +886,8 @@ function nudge(dx, dy){
 /* ---------------- keyboard ---------------- */
 const isField = t => t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
 document.addEventListener('keydown', e => {
-  if (isField(e.target) || !$('copyPanel').hidden) return;
+  if (isField(e.target) || !$('copyPanel').hidden || !$('helpPanel').hidden) return;
+  if (e.key === '?'){ openHelp(); return; }
   const k = e.key, mod = e.ctrlKey || e.metaKey;
   if (mod && (k === 'z' || k === 'Z')){ e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
   if (mod && (k === 'y' || k === 'Y')){ e.preventDefault(); redo(); return; }
@@ -1134,6 +1198,16 @@ $('pngBtn').addEventListener('click', async () => {
   if (!blob){ toast('Could not render the PNG. Try a smaller screenshot.'); return; }
   saveFile(`${baseName(sh.sample ? 'example_frame' : sh.name)}_exposure.png`, blob, 'image/png');
 });
+
+let helpOpener = null;
+function openHelp(){ helpOpener = document.activeElement; $('helpPanel').hidden = false; $('helpClose').focus(); }
+function closeHelp(){ $('helpPanel').hidden = true; if (helpOpener && helpOpener.focus) helpOpener.focus(); }
+$('helpBtn').addEventListener('click', openHelp);
+$('exampleHelp').addEventListener('click', openHelp);
+$('helpClose').addEventListener('click', closeHelp);
+$('helpDone').addEventListener('click', closeHelp);
+$('helpPanel').addEventListener('click', e => { if (e.target === $('helpPanel')) closeHelp(); });
+$('helpPanel').addEventListener('keydown', e => { if (e.key === 'Escape') closeHelp(); });
 
 let toastT = 0;
 function toast(msg){ const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 3200); }

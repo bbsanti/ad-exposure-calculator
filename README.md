@@ -6,7 +6,7 @@ Measure how much of the screen an ad takes up. Load a broadcast screenshot, draw
 angled signage) around each ad, and the tool reports the exact pixel count and share of screen for every
 shape, every sponsor and all ads combined.
 
-Everything runs in your browser. Screenshots are never uploaded anywhere.
+Everything runs in your browser. Screenshots are never uploaded anywhere. Click **How to use** on the page (or press `?`) for the full guide, including how to get a clean screenshot and where to read the exposure figure.
 
 ## Using it
 
