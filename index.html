@@ -1,0 +1,1207 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="description" content="Load a screenshot, box each ad, and get its exact pixel count and share of screen. Runs entirely in your browser."><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect x=%273%27 y=%277%27 width=%2726%27 height=%2718%27 rx=%273%27 fill=%27%23f9fafb%27 stroke=%27%23141a21%27 stroke-width=%273%27/%3E%3Crect x=%278%27 y=%2712%27 width=%2710%27 height=%276%27 rx=%271%27 fill=%27%231d58d6%27/%3E%3C/svg%3E"><style>body{margin:0}img{max-width:100%}</style></head><body><title>Ad Exposure Calculator</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one-screen workbench. Toolbar across the top, screenshot stage on the left (always a dark
+   neutral so footage colours read true), measurement ledger on the right running
+   frame -> total coverage -> by sponsor -> selection -> export. Stacks to one column on phones. */
+:root{
+  --bg:#edf0f3;
+  --panel:#f9fafb;
+  --line:#d3d9e0;
+  --fg:#141a21;
+  --muted:#5a6573;
+  --accent:#1d58d6;
+  --accent-ink:#ffffff;
+  --chip:#e2e7ee;
+  --stage:#1a1d22;
+  --stage-ink:#c3cbd4;
+  --stage-bar:rgba(10,12,15,.78);
+  --danger:#b3261e;
+  --font-ui:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --font-head:"IBM Plex Sans Condensed","Arial Narrow","IBM Plex Sans",system-ui,sans-serif;
+  --font-num:"IBM Plex Mono",ui-monospace,"Cascadia Mono",Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#101318;--panel:#161a20;--line:#2a313b;--fg:#e5e9ee;--muted:#95a1af;--accent:#6e9bff;
+    --accent-ink:#0a1020;--chip:#222832;--stage:#0b0d10;--stage-ink:#aeb7c2;--stage-bar:rgba(4,5,7,.8);
+    --danger:#ff7a6e;color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#101318;--panel:#161a20;--line:#2a313b;--fg:#e5e9ee;--muted:#95a1af;--accent:#6e9bff;
+  --accent-ink:#0a1020;--chip:#222832;--stage:#0b0d10;--stage-ink:#aeb7c2;--stage-bar:rgba(4,5,7,.8);
+  --danger:#ff7a6e;color-scheme:dark;
+}
+[hidden]{display:none!important}
+html{height:100%;box-sizing:border-box}
+*,*::before,*::after{box-sizing:inherit}
+body{height:100%;background:var(--bg);color:var(--fg);font:14px/1.45 var(--font-ui)}
+.mono{font-family:var(--font-num);font-variant-numeric:tabular-nums}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.app{
+  height:100%;display:grid;
+  grid-template-columns:minmax(0,1fr) 372px;
+  grid-template-rows:auto auto minmax(0,1fr);
+  grid-template-areas:"top top" "strip side" "stage side";
+  gap:10px 14px;padding-block:12px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));
+}
+
+/* ---------- toolbar ---------- */
+.top{grid-area:top;display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px}
+.brand{display:flex;align-items:center;gap:10px;margin-right:6px}
+.mark{width:30px;height:20px;border:2px solid var(--fg);border-radius:3px;position:relative;flex:none}
+.mark::after{content:"";position:absolute;left:3px;top:3px;width:11px;height:6px;background:var(--accent);border-radius:1px}
+.brand h1{margin:0;font:700 17px/1.1 var(--font-head);letter-spacing:.04em;text-transform:uppercase}
+.brand p{margin:2px 0 0;font-size:12px;color:var(--muted)}
+.spacer{flex:1 1 0}
+.grp{display:flex;align-items:center;gap:6px}
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 12px;
+  border:1px solid var(--line);border-radius:7px;background:var(--panel);font-weight:500;font-size:13px;
+  cursor:pointer;white-space:nowrap;
+}
+.btn:hover{border-color:var(--muted)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.icon{width:32px;padding:0}
+.btn.sm{height:28px;padding:0 10px;font-size:12px}
+.btn.danger{color:var(--danger)}
+.btn svg{width:16px;height:16px;flex:none}
+#zoomPct{min-width:58px;font-family:var(--font-num);font-size:12px;padding:0 6px}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel)}
+.seg button{
+  display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 11px;border:0;background:transparent;
+  font-size:13px;font-weight:500;cursor:pointer;border-right:1px solid var(--line)
+}
+.seg button:last-child{border-right:0}
+.seg button svg{width:16px;height:16px}
+.seg button[aria-pressed="true"]{background:var(--fg);color:var(--bg)}
+.seg kbd{font:500 10px/1 var(--font-num);padding:2px 4px;border:1px solid currentColor;border-radius:3px;opacity:.55}
+.check{display:inline-flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;user-select:none}
+
+/* ---------- filmstrip ---------- */
+.strip{grid-area:strip;display:flex;gap:8px;overflow-x:auto;padding-bottom:2px;min-width:0}
+.shotw{position:relative;flex:none}
+.shot{
+  display:flex;flex-direction:column;width:152px;padding:4px;border:1px solid var(--line);border-radius:8px;
+  background:var(--panel);cursor:pointer;text-align:left;gap:4px
+}
+.shotw.on .shot{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.shot img{width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:4px;background:var(--stage);display:block;max-width:100%}
+.shot .meta{display:flex;justify-content:space-between;gap:6px;padding:0 2px;font-size:11px;min-width:0}
+.shot .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.shot .pc{color:var(--muted);flex:none}
+.shot .badge{position:absolute;left:9px;top:9px;font:600 10px/1 var(--font-head);letter-spacing:.08em;text-transform:uppercase;background:var(--panel);color:var(--fg);padding:3px 5px;border-radius:3px}
+.shotw .x{
+  position:absolute;right:8px;top:8px;width:22px;height:22px;border-radius:50%;border:0;cursor:pointer;
+  background:var(--stage-bar);color:#fff;font-size:14px;line-height:1;display:grid;place-items:center
+}
+.shot.add{
+  width:112px;align-items:center;justify-content:center;color:var(--muted);border-style:dashed;font-size:12px;font-weight:500;
+  text-align:center;min-height:100%
+}
+
+/* ---------- stage ---------- */
+.stage{grid-area:stage;position:relative;min-height:0;background:var(--stage);border-radius:10px;overflow:hidden}
+.stage.drop{outline:2px dashed var(--accent);outline-offset:-6px}
+#cv{position:absolute;inset:0;width:100%;height:100%;touch-action:none;user-select:none;-webkit-user-select:none;display:block}
+.status{
+  position:absolute;left:0;right:0;bottom:0;min-height:28px;padding:5px 12px;background:var(--stage-bar);
+  color:var(--stage-ink);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none
+}
+.example{
+  position:absolute;left:10px;top:10px;right:10px;max-width:max-content;display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;
+  padding:7px 8px 7px 12px;border-radius:7px;background:var(--stage-bar);color:var(--stage-ink);font-size:12.5px
+}
+.example strong{color:#fff;font-weight:600}
+.example .btn{height:26px;font-size:12px}
+.empty{position:absolute;inset:0;display:grid;place-items:center;padding:24px;color:var(--stage-ink);text-align:center}
+.empty h2{margin:14px 0 4px;font:600 22px/1.2 var(--font-head);color:#fff;letter-spacing:.02em;text-wrap:balance}
+.empty p{margin:0 0 16px;font-size:13px}
+.empty .mark{margin:0 auto;width:54px;height:34px;border-color:var(--stage-ink)}
+.empty .mark::after{width:20px;height:11px;left:5px;top:5px}
+
+/* ---------- ledger ---------- */
+.side{grid-area:side;min-height:0;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:0 16px 16px}
+.sec{border-top:1px solid var(--line);padding-block:14px;display:grid;gap:8px}
+.sec:first-child{border-top:0}
+.eyebrow{font:600 11px/1.2 var(--font-head);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.erow{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.note{margin:0;font-size:12px;color:var(--muted);line-height:1.45}
+.kv{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.kv div{display:grid;gap:2px;min-width:0}
+.kv .k{font-size:11px;color:var(--muted)}
+.kv .v{font-size:13px;font-weight:500;overflow-wrap:anywhere}
+.big{display:flex;align-items:baseline;gap:4px;font:600 48px/1 var(--font-head);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.big .unit{font-size:22px;color:var(--muted)}
+.bar{height:8px;border-radius:4px;background:var(--chip);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent);border-radius:4px;min-width:0;transition:width .15s}
+.sub{font-size:12px;color:var(--muted)}
+
+.lhead,.lrow{display:grid;grid-template-columns:14px minmax(0,1fr) 76px 60px 18px;align-items:center;column-gap:8px}
+.lhead{font-size:11px;color:var(--muted);padding:0 6px}
+.lhead span:nth-child(n+3),.lrow .lc,.lrow .lp,.lrow .lpc{text-align:right}
+.lrow .lc{grid-column:4;color:var(--muted);font-size:11px}
+.labels{display:grid;gap:2px}
+.lrow{padding:6px;border-radius:6px;cursor:pointer;row-gap:5px}
+.lrow:hover{background:var(--chip)}
+.lrow.on{background:var(--chip)}
+.lrow.on .ln{font-weight:600}
+.sw{width:14px;height:14px;border-radius:3px;background:var(--c);flex:none}
+.lrow.on .sw{box-shadow:0 0 0 2px var(--panel),0 0 0 3.5px var(--fg)}
+.ln{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ln input{width:100%;height:24px;padding:0 6px;border:1px solid var(--accent);border-radius:4px;background:var(--panel)}
+.lc,.lp,.lpc{font-size:12px}
+.lpc{font-weight:600}
+.lrow .del{width:20px;height:20px;border:0;border-radius:4px;background:transparent;color:var(--muted);cursor:pointer;font-size:15px;line-height:1}
+.lrow .del:hover{background:var(--line);color:var(--danger)}
+.lbar{grid-column:2 / 4;grid-row:2;height:4px;border-radius:2px;background:var(--line);overflow:hidden}
+.lbar i{display:block;height:100%;background:var(--c)}
+.addl{display:flex;gap:6px}
+.addl input,.field select,.xywh input,.field-inline select{
+  height:30px;padding:0 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);min-width:0
+}
+.addl input{flex:1}
+
+.field{display:grid;gap:4px;font-size:12px;color:var(--muted)}
+.field select{color:var(--fg);font-size:13px}
+.xywh{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.xywh label{display:grid;gap:3px;font-size:11px;color:var(--muted)}
+.xywh input{font-family:var(--font-num);font-size:12.5px;color:var(--fg);width:100%}
+.selstats{font-size:13px;font-weight:500}
+
+.shapes{list-style:none;margin:0;padding:0;display:grid;gap:2px}
+.shapes button{
+  width:100%;display:grid;grid-template-columns:12px minmax(0,1fr) auto 56px;align-items:center;gap:8px;
+  padding:6px;border:0;border-radius:6px;background:transparent;cursor:pointer;text-align:left;font-size:12.5px
+}
+.shapes button:hover,.shapes button.on{background:var(--chip)}
+.shapes .sw{width:12px;height:12px}
+.shapes .sn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.shapes .sg{color:var(--muted);font-size:11.5px}
+.shapes .sp{text-align:right;font-size:12px;font-weight:600}
+.empty-li{font-size:12px;color:var(--muted);padding:2px 0}
+
+.field-inline{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12.5px}
+.field-inline select{color:var(--fg);font-size:12.5px}
+.row{display:flex;flex-wrap:wrap;gap:6px}
+.keys{display:grid;grid-template-columns:auto minmax(0,1fr);gap:5px 12px;margin:0;font-size:12px}
+.keys dt{font-family:var(--font-num);font-size:11.5px;white-space:nowrap}
+.keys dd{margin:0;color:var(--muted)}
+
+/* ---------- toast + copy sheet ---------- */
+.toast{
+  position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translate(-50%,8px);
+  max-width:min(560px,calc(100% - 32px));background:var(--fg);color:var(--bg);padding:9px 14px;border-radius:8px;
+  font-size:13px;opacity:0;pointer-events:none;transition:opacity .18s,transform .18s;z-index:20
+}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.sheet{position:fixed;inset:0;background:rgba(0,0,0,.45);display:grid;place-items:center;padding:16px;z-index:30}
+.sheet-in{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;width:min(640px,100%);display:grid;gap:10px}
+.sheet-in h2{margin:0;font:600 16px var(--font-head);letter-spacing:.02em}
+.sheet textarea{width:100%;height:220px;font:12px/1.4 var(--font-num);padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);resize:vertical}
+
+@media (max-width: 900px){
+  html,body{height:auto}
+  .app{height:auto;grid-template-columns:minmax(0,1fr);grid-template-rows:none;grid-template-areas:"top" "strip" "stage" "side"}
+  .stage{height:62svh;min-height:300px}
+  .side{overflow:visible}
+}
+@media (max-width: 640px){
+  .seg kbd,.brand p,.check{display:none}
+  .seg button{padding:0 9px}
+  .spacer{display:none}
+  .lhead,.lrow{grid-template-columns:14px minmax(0,1fr) 70px 56px 18px;column-gap:6px}
+}
+@media (prefers-reduced-motion: reduce){.toast,.bar i{transition:none}}
+</style>
+
+<div class="app" id="app">
+  <header class="top">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"></span>
+      <div><h1>Ad Exposure Calculator</h1><p>Share of screen, counted in pixels</p></div>
+    </div>
+
+    <div class="seg" role="group" aria-label="Drawing tool">
+      <button type="button" id="tool-rect" data-tool="rect" aria-pressed="true" title="Box: drag around an ad (B)">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="4" width="11" height="8" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>Box<kbd>B</kbd></button>
+      <button type="button" id="tool-poly" data-tool="poly" aria-pressed="false" title="Polygon: click around an angled ad (P)">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 11.5 5.5 3.5l8 2.5-1.5 7z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>Polygon<kbd>P</kbd></button>
+      <button type="button" id="tool-move" data-tool="move" aria-pressed="false" title="Move: drag shapes, or drag empty space to pan (V)">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5v13M1.5 8h13M6 3.5l2-2 2 2M6 12.5l2 2 2-2M3.5 6l-2 2 2 2M12.5 6l2 2-2 2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Move<kbd>V</kbd></button>
+      <button type="button" id="tool-frame" data-tool="frame" aria-pressed="false" title="Frame: mark the video area inside a screenshot (F)">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 5.5V2h3.5M10.5 2H14v3.5M14 10.5V14h-3.5M5.5 14H2v-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Frame<kbd>F</kbd></button>
+    </div>
+
+    <div class="grp">
+      <button type="button" class="btn icon" id="undoBtn" aria-label="Undo" title="Undo (Ctrl+Z)">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 3.5 2.5 6.5l3 3M3 6.5h6.5a3.5 3.5 0 0 1 0 7H7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <button type="button" class="btn icon" id="redoBtn" aria-label="Redo" title="Redo (Ctrl+Shift+Z)">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 3.5l3 3-3 3M13 6.5H6.5a3.5 3.5 0 0 0 0 7H9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    </div>
+
+    <div class="grp">
+      <button type="button" class="btn icon" id="zoomOut" aria-label="Zoom out" title="Zoom out (−)">−</button>
+      <button type="button" class="btn" id="zoomPct" title="Zoom to 100% (1)">100%</button>
+      <button type="button" class="btn icon" id="zoomIn" aria-label="Zoom in" title="Zoom in (+)">+</button>
+      <button type="button" class="btn" id="zoomFit" title="Fit to stage (0)">Fit</button>
+    </div>
+
+    <label class="check" for="tagsT"><input type="checkbox" id="tagsT" checked> Tags</label>
+    <span class="spacer"></span>
+    <button type="button" class="btn primary" id="openBtn">Open screenshots</button>
+    <input type="file" id="file" accept="image/*" multiple hidden>
+  </header>
+
+  <nav class="strip" id="strip" aria-label="Screenshots"></nav>
+
+  <main class="stage" id="stage">
+    <canvas id="cv" aria-label="Screenshot with ad shapes"></canvas>
+    <div class="example" id="exampleNote" hidden>
+      <span><strong>Example frame.</strong> The sponsors here are made up. Open or paste (Ctrl+V) a screenshot to measure your own.</span>
+      <button type="button" class="btn sm primary" id="exampleOpen">Open screenshot</button>
+    </div>
+    <div class="empty" id="empty" hidden>
+      <div>
+        <div class="mark" aria-hidden="true"></div>
+        <h2>Drop screenshots here</h2>
+        <p>Or paste one with Ctrl+V. PNG, JPG and WebP all work, and several at once is fine.</p>
+        <button type="button" class="btn primary" id="emptyOpen">Open screenshots</button>
+      </div>
+    </div>
+    <div class="status mono" id="status"></div>
+  </main>
+
+  <aside class="side" id="side" aria-label="Measurements">
+    <section class="sec">
+      <div class="erow"><span class="eyebrow">Frame</span><button type="button" class="btn sm" id="frameReset" hidden>Use whole screenshot</button></div>
+      <div class="kv">
+        <div><span class="k">Size</span><span class="v mono" id="frameSize">—</span></div>
+        <div><span class="k">Format</span><span class="v" id="frameFmt">—</span></div>
+        <div><span class="k">Total pixels</span><span class="v mono" id="framePx">—</span></div>
+      </div>
+      <p class="note" id="frameNote"></p>
+    </section>
+
+    <section class="sec">
+      <span class="eyebrow">Total ad coverage</span>
+      <div class="big"><span id="totPct">0.00</span><span class="unit">%</span></div>
+      <div class="bar" aria-hidden="true"><i id="totBar" style="width:0%"></i></div>
+      <div class="sub mono" id="totPx">0 px</div>
+      <p class="note" id="overlapNote" hidden></p>
+    </section>
+
+    <section class="sec">
+      <span class="eyebrow">By sponsor</span>
+      <div class="lhead" aria-hidden="true"><span></span><span>Sponsor</span><span>Pixels</span><span>Share</span><span></span></div>
+      <div class="labels" id="labels"></div>
+      <form class="addl" id="addLabelForm">
+        <input id="addLabel" type="text" placeholder="Add a sponsor" aria-label="New sponsor name" autocomplete="off">
+        <button class="btn sm" type="submit">Add</button>
+      </form>
+      <p class="note">New shapes go to the highlighted sponsor. Double-click a name to rename it.</p>
+    </section>
+
+    <section class="sec" id="secSel" hidden>
+      <div class="erow"><span class="eyebrow">Selected shape</span><button type="button" class="btn sm danger" id="selDelete">Delete</button></div>
+      <label class="field" for="selLabel">Sponsor<select id="selLabel"></select></label>
+      <div class="xywh" id="selRect">
+        <label for="selX">X<input id="selX" type="number" inputmode="numeric" step="1"></label>
+        <label for="selY">Y<input id="selY" type="number" inputmode="numeric" step="1"></label>
+        <label for="selW">Width<input id="selW" type="number" inputmode="numeric" step="1" min="1"></label>
+        <label for="selH">Height<input id="selH" type="number" inputmode="numeric" step="1" min="1"></label>
+      </div>
+      <p class="note" id="selPoly" hidden></p>
+      <div class="selstats mono" id="selStats"></div>
+    </section>
+
+    <section class="sec">
+      <span class="eyebrow">Shapes on this screenshot</span>
+      <ol class="shapes" id="shapes"></ol>
+    </section>
+
+    <section class="sec">
+      <span class="eyebrow">Export</span>
+      <div class="field-inline">
+        <label for="basis">Count pixels at</label>
+        <select id="basis">
+          <option value="native">Screenshot size</option>
+          <option value="1080">1920 × 1080</option>
+          <option value="2160">3840 × 2160</option>
+          <option value="720">1280 × 720</option>
+        </select>
+      </div>
+      <div class="row">
+        <button type="button" class="btn" id="copyBtn">Copy table</button>
+        <button type="button" class="btn" id="csvBtn">Download CSV</button>
+        <button type="button" class="btn" id="pngBtn">Annotated PNG</button>
+      </div>
+      <p class="note">The table has one row per sponsor per screenshot plus an all-ads total, and pastes straight into Sheets or Excel.</p>
+    </section>
+
+    <section class="sec">
+      <span class="eyebrow">Keys</span>
+      <dl class="keys">
+        <dt>B P V F</dt><dd>Box, Polygon, Move, Frame</dd>
+        <dt>Alt + drag</dt><dd>New box on top of the selected one</dd>
+        <dt>Enter / Esc</dt><dd>Close / cancel a polygon</dd>
+        <dt>Del</dt><dd>Delete the selected shape</dd>
+        <dt>Arrows</dt><dd>Nudge 1 px (Shift: 10 px)</dd>
+        <dt>Ctrl + Z</dt><dd>Undo (Shift for redo)</dd>
+        <dt>Space + drag</dt><dd>Pan. Wheel zooms, 0 fits, 1 is 100%</dd>
+        <dt>Ctrl + V</dt><dd>Paste a screenshot</dd>
+        <dt>T</dt><dd>Show or hide tags</dd>
+      </dl>
+    </section>
+  </aside>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div class="sheet" id="copyPanel" hidden>
+  <div class="sheet-in" role="dialog" aria-modal="true" aria-labelledby="copyTitle">
+    <h2 id="copyTitle">Copy the table</h2>
+    <p class="note">This view blocked automatic copying. The text is selected: press Ctrl+C, then paste into your sheet.</p>
+    <textarea id="copyText" readonly aria-label="Table text"></textarea>
+    <div class="row"><button type="button" class="btn" id="copyClose">Close</button></div>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+const $ = id => document.getElementById(id);
+const PALETTE = ['#ffd23f','#3fe0cf','#ff5fa2','#8fe04e','#ff9a47','#86a9ff','#c98cff','#ff5c5c','#4fd1ff','#e8e8e8'];
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const fmtInt = n => Math.round(n).toLocaleString('en-US');
+const pctStr = p => (p > 0 && p < 0.1 ? p.toFixed(3) : p.toFixed(2));
+const fmtPct = p => pctStr(p) + '%';
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let uid = 1; const nid = p => p + (uid++);
+
+// ==GEOM==  Pixel counting. A pixel counts as covered when its centre lies inside the shape,
+// so a box with integer edges covers exactly width x height pixels.
+function frameOf(shot){ return shot.frame || {x:0, y:0, w:shot.W, h:shot.H}; }
+function shapeSpans(sh, f, cb){
+  // cb(row, x0, x1): covered pixels [x0, x1) on that row, clipped to the frame
+  if (sh.type === 'rect'){
+    const x0 = Math.max(sh.x, f.x), x1 = Math.min(sh.x + sh.w, f.x + f.w);
+    const y0 = Math.max(sh.y, f.y), y1 = Math.min(sh.y + sh.h, f.y + f.h);
+    if (x1 <= x0 || y1 <= y0) return;
+    for (let y = y0; y < y1; y++) cb(y, x0, x1);
+    return;
+  }
+  const p = sh.pts; let minY = Infinity, maxY = -Infinity;
+  for (const q of p){ if (q[1] < minY) minY = q[1]; if (q[1] > maxY) maxY = q[1]; }
+  const yA = Math.max(f.y, Math.ceil(minY - 0.5)), yB = Math.min(f.y + f.h - 1, Math.floor(maxY - 0.5));
+  const xs = [];
+  for (let y = yA; y <= yB; y++){
+    const yc = y + 0.5; xs.length = 0;
+    for (let i = 0, j = p.length - 1; i < p.length; j = i++){
+      const yi = p[i][1], yj = p[j][1];
+      if ((yi > yc) !== (yj > yc)) xs.push(p[i][0] + (yc - yi) * (p[j][0] - p[i][0]) / (yj - yi));
+    }
+    xs.sort((a, b) => a - b);
+    for (let k = 0; k + 1 < xs.length; k += 2){
+      const a = Math.max(f.x, Math.ceil(xs[k] - 0.5)), b = Math.min(f.x + f.w, Math.ceil(xs[k + 1] - 0.5));
+      if (b > a) cb(y, a, b);
+    }
+  }
+}
+function soloCount(sh, f){ let n = 0; shapeSpans(sh, f, (y, a, b) => { n += b - a; }); return n; }
+let MASK = new Uint8Array(0);
+function unionCount(list, f){
+  if (!list.length) return 0;
+  if (list.length === 1) return soloCount(list[0], f);
+  const need = f.w * f.h; if (MASK.length < need) MASK = new Uint8Array(need);
+  const m = MASK; let n = 0;
+  const set = (y, a, b) => { const r = (y - f.y) * f.w - f.x; for (let i = r + a, e = r + b; i < e; i++) if (m[i] === 0){ m[i] = 1; n++; } };
+  const clr = (y, a, b) => { const r = (y - f.y) * f.w - f.x; m.fill(0, r + a, r + b); };
+  for (const s of list) shapeSpans(s, f, set);
+  for (const s of list) shapeSpans(s, f, clr);
+  return n;
+}
+// ==/GEOM==
+
+/* ---------------- state ---------------- */
+const S = {
+  shots: [], cur: -1, labels: [], activeLabel: null,
+  tool: 'rect', sel: null, basis: 'native', tags: true,
+  view: {s:1, ox:0, oy:0, fitted:true},
+  drag: null, poly: null, pinch: null, mouse: null, space: false, renaming: null
+};
+const BASES = {native:null, '1080':[1920,1080], '2160':[3840,2160], '720':[1280,720]};
+const cur = () => S.shots[S.cur] || null;
+const labelById = id => S.labels.find(l => l.id === id) || {id, name:'Unlabeled', color:'#d0d0d0'};
+const selShape = () => { const sh = cur(); return sh ? sh.shapes.find(s => s.id === S.sel) || null : null; };
+function addLabel(name){
+  const used = new Set(S.labels.map(l => l.color));
+  const color = PALETTE.find(c => !used.has(c)) || PALETTE[S.labels.length % PALETTE.length];
+  const l = {id:nid('L'), name, color}; S.labels.push(l); return l;
+}
+function ensureActiveLabel(){
+  let l = S.labels.find(x => x.id === S.activeLabel);
+  if (!l){ l = S.labels[0] || addLabel('Ad 1'); S.activeLabel = l.id; }
+  return l;
+}
+const activeColor = () => (S.labels.find(x => x.id === S.activeLabel) || {color:PALETTE[S.labels.length % PALETTE.length]}).color;
+
+function makeShot(name, src, W, H, sample){
+  const c = document.createElement('canvas'); const tw = 240; c.width = tw; c.height = Math.max(1, Math.round(tw * H / W));
+  c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
+  return {id:nid('S'), name, src, W, H, frame:null, shapes:[], v:0, undo:[], redo:[], sample:!!sample, thumb:c.toDataURL('image/jpeg', .75)};
+}
+function statsFor(sh){
+  if (sh._st && sh._sv === sh.v) return sh._st;
+  const f = frameOf(sh), fpx = f.w * f.h;
+  const perShape = new Map(), groups = new Map(), perLabel = new Map();
+  for (const s of sh.shapes){
+    perShape.set(s.id, soloCount(s, f));
+    if (!groups.has(s.label)) groups.set(s.label, []);
+    groups.get(s.label).push(s);
+  }
+  for (const [lid, arr] of groups) perLabel.set(lid, {px:unionCount(arr, f), n:arr.length});
+  const total = unionCount(sh.shapes, f);
+  sh._st = {f, fpx, perShape, perLabel, total}; sh._sv = sh.v;
+  return sh._st;
+}
+const disp = (px, st) => { const b = BASES[S.basis]; return b ? px / st.fpx * b[0] * b[1] : px; };
+
+/* ---------------- undo ---------------- */
+const snap = sh => JSON.stringify({frame:sh.frame, shapes:sh.shapes});
+function pushUndo(sh, s){ sh.undo.push(s || snap(sh)); if (sh.undo.length > 200) sh.undo.shift(); sh.redo.length = 0; }
+function touch(sh){ sh.v++; schedule(true); }
+function restore(sh, str){
+  const o = JSON.parse(str); sh.frame = o.frame; sh.shapes = o.shapes;
+  for (const s of sh.shapes) if (!S.labels.some(l => l.id === s.label)){
+    const used = new Set(S.labels.map(l => l.color));
+    S.labels.push({id:s.label, name:'Restored sponsor', color:PALETTE.find(c => !used.has(c)) || '#d0d0d0'});
+  }
+  if (!sh.shapes.some(s => s.id === S.sel)) S.sel = null;
+  touch(sh);
+}
+function undo(){ const sh = cur(); if (!sh || !sh.undo.length) return; S.poly = null; sh.redo.push(snap(sh)); restore(sh, sh.undo.pop()); }
+function redo(){ const sh = cur(); if (!sh || !sh.redo.length) return; sh.undo.push(snap(sh)); restore(sh, sh.redo.pop()); }
+
+/* ---------------- canvas + view ---------------- */
+const stage = $('stage'), cv = $('cv'), ctx = cv.getContext('2d');
+let dpr = 1, CW = 0, CH = 0;
+const STATUS_H = 28;
+new ResizeObserver(() => {
+  const r = stage.getBoundingClientRect(); dpr = window.devicePixelRatio || 1;
+  CW = r.width; CH = r.height; cv.width = Math.max(1, Math.round(CW * dpr)); cv.height = Math.max(1, Math.round(CH * dpr));
+  if (S.view.fitted) fit(); else schedule();
+}).observe(stage);
+const toImg = (sx, sy) => [(sx - S.view.ox) / S.view.s, (sy - S.view.oy) / S.view.s];
+const toScr = (x, y) => [x * S.view.s + S.view.ox, y * S.view.s + S.view.oy];
+const local = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+function fit(){
+  const sh = cur(); if (!sh || !CW) { schedule(true); return; }
+  const pad = Math.min(28, CW * .04), avH = CH - STATUS_H;
+  const s = Math.max(0.01, Math.min((CW - 2 * pad) / sh.W, (avH - 2 * pad) / sh.H));
+  S.view = {s, ox:(CW - sh.W * s) / 2, oy:(avH - sh.H * s) / 2, fitted:true};
+  schedule(true);
+}
+function zoomAt(f, sx, sy){
+  if (!cur()) return;
+  const [ix, iy] = toImg(sx, sy); const ns = clamp(S.view.s * f, 0.02, 48);
+  S.view.s = ns; S.view.ox = sx - ix * ns; S.view.oy = sy - iy * ns; S.view.fitted = false; schedule();
+}
+
+let rafPending = false, panelDirty = false;
+function schedule(panel){
+  if (panel) panelDirty = true;
+  if (rafPending) return; rafPending = true;
+  requestAnimationFrame(() => { rafPending = false; draw(); if (panelDirty){ panelDirty = false; renderPanel(); } renderStatus(); });
+}
+
+function hexA(hex, a){ const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; }
+function bbox(sh){
+  if (sh.type === 'rect') return {x:sh.x, y:sh.y, w:sh.w, h:sh.h};
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const [x, y] of sh.pts){ x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+  return {x:x0, y:y0, w:x1 - x0, h:y1 - y0};
+}
+function inside(sh, x, y){
+  if (sh.type === 'rect') return x >= sh.x && x <= sh.x + sh.w && y >= sh.y && y <= sh.y + sh.h;
+  let c = false; const p = sh.pts;
+  for (let i = 0, j = p.length - 1; i < p.length; j = i++)
+    if ((p[i][1] > y) !== (p[j][1] > y) && x < p[i][0] + (y - p[i][1]) * (p[j][0] - p[i][0]) / (p[j][1] - p[i][1])) c = !c;
+  return c;
+}
+function hitShape(x, y){ const a = cur().shapes; for (let i = a.length - 1; i >= 0; i--) if (inside(a[i], x, y)) return a[i]; return null; }
+function handlesOf(sh){
+  if (sh.type === 'rect'){ const {x, y, w, h} = sh;
+    return [['nw',x,y],['n',x+w/2,y],['ne',x+w,y],['e',x+w,y+h/2],['se',x+w,y+h],['s',x+w/2,y+h],['sw',x,y+h],['w',x,y+h/2]]; }
+  return sh.pts.map((p, i) => [i, p[0], p[1]]);
+}
+function hitHandle(sh, sx, sy){
+  for (const [k, x, y] of handlesOf(sh)){ const [hx, hy] = toScr(x, y); if (Math.abs(hx - sx) <= 7 && Math.abs(hy - sy) <= 7) return k; }
+  return null;
+}
+const normRect = (a, b) => ({x:Math.min(a[0], b[0]), y:Math.min(a[1], b[1]), w:Math.abs(a[0] - b[0]), h:Math.abs(a[1] - b[1])});
+
+function tag(c, txt, x, y, color, fs, ink){
+  c.font = `600 ${fs}px "IBM Plex Sans", system-ui, sans-serif`;
+  const w = c.measureText(txt).width + fs * .9, h = Math.round(fs * 1.6);
+  let ty = y - h - 2; if (ty < 0) ty = y + 2;
+  c.fillStyle = color; c.fillRect(x, ty, w, h);
+  c.fillStyle = ink || '#0b0d10'; c.textBaseline = 'middle'; c.textAlign = 'left';
+  c.fillText(txt, x + fs * .45, ty + h / 2 + .5);
+}
+// Paints frame mask, shapes and tags. T maps image coords to the target: x*T.s+T.ox.
+function paintOverlay(c, sh, st, T){
+  const P = (x, y) => [x * T.s + T.ox, y * T.s + T.oy];
+  if (sh.frame){
+    const f = sh.frame, [ix, iy] = P(0, 0), [fx, fy] = P(f.x, f.y);
+    c.save(); c.fillStyle = 'rgba(6,8,10,.64)'; c.beginPath();
+    c.rect(ix, iy, sh.W * T.s, sh.H * T.s); c.rect(fx, fy, f.w * T.s, f.h * T.s); c.fill('evenodd');
+    c.setLineDash([6 * T.k, 4 * T.k]); c.strokeStyle = '#ffffff'; c.lineWidth = T.lw * .7;
+    c.strokeRect(fx, fy, f.w * T.s, f.h * T.s); c.restore();
+  }
+  for (const s of sh.shapes){
+    const l = labelById(s.label); c.beginPath();
+    if (s.type === 'rect'){ const [x, y] = P(s.x, s.y); c.rect(x, y, s.w * T.s, s.h * T.s); }
+    else { s.pts.forEach(([x, y], i) => { const q = P(x, y); i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1]); }); c.closePath(); }
+    c.fillStyle = hexA(l.color, s.id === T.sel ? .3 : .2); c.fill();
+    c.lineWidth = s.id === T.sel ? T.lw * 1.6 : T.lw; c.strokeStyle = l.color; c.stroke();
+  }
+  if (T.tags) for (const s of sh.shapes){
+    const l = labelById(s.label), px = st.perShape.get(s.id) || 0, b = bbox(s), [x, y] = P(b.x, b.y);
+    tag(c, `${l.name}  ${fmtPct(px / st.fpx * 100)}`, x, y, l.color, T.font);
+  }
+}
+function drawPixelGrid(sh){
+  const v = S.view, [x0, y0] = toImg(0, 0), [x1, y1] = toImg(CW, CH);
+  const a = Math.max(0, Math.floor(x0)), b = Math.min(sh.W, Math.ceil(x1)), c0 = Math.max(0, Math.floor(y0)), d = Math.min(sh.H, Math.ceil(y1));
+  ctx.strokeStyle = 'rgba(255,255,255,.13)'; ctx.lineWidth = 1; ctx.beginPath();
+  for (let x = a; x <= b; x++){ const sx = Math.round(x * v.s + v.ox) + .5; ctx.moveTo(sx, c0 * v.s + v.oy); ctx.lineTo(sx, d * v.s + v.oy); }
+  for (let y = c0; y <= d; y++){ const sy = Math.round(y * v.s + v.oy) + .5; ctx.moveTo(a * v.s + v.ox, sy); ctx.lineTo(b * v.s + v.ox, sy); }
+  ctx.stroke();
+}
+let lastZoomTxt = '';
+function draw(){
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, CW, CH);
+  const sh = cur(); $('empty').hidden = !!sh;
+  const zt = sh ? Math.round(S.view.s * 100) + '%' : '—';
+  if (zt !== lastZoomTxt){ $('zoomPct').textContent = zt; lastZoomTxt = zt; }
+  if (!sh) return;
+  const v = S.view;
+  ctx.save(); ctx.translate(v.ox, v.oy); ctx.scale(v.s, v.s);
+  ctx.imageSmoothingEnabled = v.s < 4; ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(sh.src, 0, 0, sh.W, sh.H); ctx.restore();
+  if (v.s >= 14) drawPixelGrid(sh);
+  const st = statsFor(sh);
+  paintOverlay(ctx, sh, st, {s:v.s, ox:v.ox, oy:v.oy, lw:1.75, k:1, font:12, sel:S.sel, tags:S.tags});
+
+  const sel = selShape();
+  if (sel){
+    ctx.lineWidth = 1;
+    for (const [, x, y] of handlesOf(sel)){ const [hx, hy] = toScr(x, y);
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(hx - 4, hy - 4, 8, 8); ctx.strokeStyle = '#0b0d10'; ctx.strokeRect(hx - 4.5, hy - 4.5, 9, 9); }
+  }
+  const d = S.drag;
+  if (d && (d.type === 'draw' || d.type === 'frame')){
+    const r = normRect(d.a, d.b), [x, y] = toScr(r.x, r.y), col = d.type === 'frame' ? '#ffffff' : activeColor();
+    if (d.type === 'draw'){ ctx.fillStyle = hexA(col, .18); ctx.fillRect(x, y, r.w * v.s, r.h * v.s); }
+    ctx.setLineDash([5, 4]); ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.strokeRect(x, y, r.w * v.s, r.h * v.s); ctx.setLineDash([]);
+  }
+  if (S.poly){
+    const col = activeColor(), pts = S.poly.pts.map(p => toScr(p[0], p[1]));
+    ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.beginPath();
+    pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.stroke();
+    if (S.mouse){ const [x, y] = pts[pts.length - 1]; ctx.setLineDash([5, 4]); ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(S.mouse.sx, S.mouse.sy); ctx.stroke(); ctx.setLineDash([]); }
+    pts.forEach(([x, y], i) => { ctx.fillStyle = i ? '#ffffff' : col; ctx.beginPath(); ctx.arc(x, y, i ? 3.5 : 5.5, 0, Math.PI * 2); ctx.fill(); });
+  }
+  if (S.mouse && !S.space && !S.pinch && S.tool !== 'move' && !(d && d.type === 'pan')){
+    const [cx, cy] = toScr(clamp(Math.round(S.mouse.ix), 0, sh.W), clamp(Math.round(S.mouse.iy), 0, sh.H));
+    ctx.strokeStyle = 'rgba(255,255,255,.3)'; ctx.lineWidth = 1; ctx.setLineDash([3, 4]); ctx.beginPath();
+    ctx.moveTo(Math.round(cx) + .5, 0); ctx.lineTo(Math.round(cx) + .5, CH); ctx.moveTo(0, Math.round(cy) + .5); ctx.lineTo(CW, Math.round(cy) + .5);
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+}
+
+/* ---------------- status line ---------------- */
+const HINT = {
+  rect: 'Drag around an ad to box it. Drag a selected box to move it, or grab a handle to resize.',
+  poly: 'Click around an angled ad to outline it, then click the first point or press Enter.',
+  move: 'Drag a shape to move it, or drag empty space to pan.',
+  frame: 'Drag around the video picture if the screenshot also shows player controls or desktop.'
+};
+let lastStatus = '';
+function renderStatus(){
+  const sh = cur(); let t = '';
+  if (sh){
+    const parts = [];
+    if (S.mouse){ const x = Math.floor(S.mouse.ix), y = Math.floor(S.mouse.iy); if (x >= 0 && y >= 0 && x < sh.W && y < sh.H) parts.push(`x ${x}  y ${y}`); }
+    const d = S.drag, st = statsFor(sh);
+    if (d && d.type === 'draw'){ const r = normRect(d.a, d.b), px = soloCount({type:'rect', ...r}, st.f); parts.push(`Box ${r.w} × ${r.h} = ${fmtInt(px)} px · ${fmtPct(px / st.fpx * 100)} of frame`); }
+    else if (d && d.type === 'frame'){ const r = normRect(d.a, d.b); parts.push(`Frame ${r.w} × ${r.h} at (${r.x}, ${r.y})`); }
+    else if (S.poly) parts.push(`Polygon, ${S.poly.pts.length} point${S.poly.pts.length === 1 ? '' : 's'}. Click the first point or press Enter to close. Backspace removes a point, Esc cancels.`);
+    else parts.push(HINT[S.tool]);
+    t = parts.join('   ·   ');
+  }
+  if (t !== lastStatus){ $('status').textContent = t; lastStatus = t; }
+}
+
+/* ---------------- pointer input ---------------- */
+const sn = (v, max) => clamp(Math.round(v), 0, max);
+const touches = new Map();
+const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+function commitOnce(sh, d){ if (!d.committed){ pushUndo(sh, d.snap); d.committed = true; } }
+
+cv.addEventListener('contextmenu', e => e.preventDefault());
+cv.addEventListener('pointerdown', e => {
+  const sh = cur(); if (!sh || e.button === 2) return;
+  try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+  const [sx, sy] = local(e), [ix, iy] = toImg(sx, sy);
+  if (e.pointerType === 'touch'){
+    touches.set(e.pointerId, [sx, sy]);
+    if (touches.size === 2){
+      if (S.drag && S.drag.committed) restore(sh, sh.undo.pop());
+      S.drag = null;
+      const [a, b] = [...touches.values()];
+      S.pinch = {d:Math.max(1, dist(a, b)), m:mid(a, b), s:S.view.s, ox:S.view.ox, oy:S.view.oy};
+      return;
+    }
+  }
+  const startPan = () => { S.drag = {type:'pan', sx, sy, ox:S.view.ox, oy:S.view.oy}; cv.style.cursor = 'grabbing'; };
+  if (e.button === 1 || S.space){ e.preventDefault(); startPan(); return; }
+  if (S.tool === 'poly'){ polyClick(ix, iy, sx, sy); return; }
+  const sel = selShape();
+  if (sel && S.tool !== 'frame'){
+    const h = hitHandle(sel, sx, sy);
+    if (h !== null){ S.drag = {type:sel.type === 'rect' ? 'resize' : 'vertex', h, orig:structuredClone(sel), snap:snap(sh)}; return; }
+  }
+  if (S.tool === 'frame'){ const a = [sn(ix, sh.W), sn(iy, sh.H)]; S.drag = {type:'frame', a, b:a.slice(), snap:snap(sh)}; schedule(); return; }
+  if (S.tool === 'move'){
+    const hit = hitShape(ix, iy);
+    if (hit){ S.sel = hit.id; S.drag = {type:'move', orig:structuredClone(hit), start:[ix, iy], snap:snap(sh)}; schedule(true); return; }
+    if (S.sel){ S.sel = null; schedule(true); }
+    startPan(); return;
+  }
+  if (sel && !e.altKey && inside(sel, ix, iy)){ S.drag = {type:'move', orig:structuredClone(sel), start:[ix, iy], snap:snap(sh)}; return; }
+  const a = [sn(ix, sh.W), sn(iy, sh.H)];
+  S.drag = {type:'draw', a, b:a.slice(), sx, sy};
+});
+
+cv.addEventListener('pointermove', e => {
+  const sh = cur(); if (!sh) return;
+  const [sx, sy] = local(e), [ix, iy] = toImg(sx, sy);
+  if (S.pinch && touches.has(e.pointerId)){
+    touches.set(e.pointerId, [sx, sy]);
+    if (touches.size < 2) return;
+    const [a, b] = [...touches.values()], m = mid(a, b), P = S.pinch;
+    const ns = clamp(P.s * dist(a, b) / P.d, 0.02, 48);
+    const qx = (P.m[0] - P.ox) / P.s, qy = (P.m[1] - P.oy) / P.s;
+    S.view.s = ns; S.view.ox = m[0] - qx * ns; S.view.oy = m[1] - qy * ns; S.view.fitted = false;
+    schedule(); return;
+  }
+  S.mouse = {sx, sy, ix, iy};
+  const d = S.drag;
+  if (!d){ updateCursor(sx, sy, ix, iy); schedule(); return; }
+  if (d.type === 'pan'){ S.view.ox = d.ox + (sx - d.sx); S.view.oy = d.oy + (sy - d.sy); S.view.fitted = false; schedule(); return; }
+  if (d.type === 'draw' || d.type === 'frame'){ d.b = [sn(ix, sh.W), sn(iy, sh.H)]; schedule(); return; }
+  const t = selShape(); if (!t) return;
+  if (d.type === 'move'){
+    const dx0 = Math.round(ix - d.start[0]), dy0 = Math.round(iy - d.start[1]);
+    if (!dx0 && !dy0 && !d.committed) return;
+    commitOnce(sh, d);
+    const b = bbox(d.orig), dx = clamp(dx0, -b.x, sh.W - b.x - b.w), dy = clamp(dy0, -b.y, sh.H - b.y - b.h);
+    if (t.type === 'rect'){ t.x = d.orig.x + dx; t.y = d.orig.y + dy; }
+    else t.pts = d.orig.pts.map(([x, y]) => [x + dx, y + dy]);
+  } else if (d.type === 'resize'){
+    commitOnce(sh, d);
+    const o = d.orig, h = d.h, x = sn(ix, sh.W), y = sn(iy, sh.H);
+    let x0 = o.x, y0 = o.y, x1 = o.x + o.w, y1 = o.y + o.h;
+    if (h.includes('w')) x0 = x; if (h.includes('e')) x1 = x; if (h.includes('n')) y0 = y; if (h.includes('s')) y1 = y;
+    t.x = Math.min(x0, x1); t.y = Math.min(y0, y1); t.w = Math.max(1, Math.abs(x1 - x0)); t.h = Math.max(1, Math.abs(y1 - y0));
+    t.x = Math.min(t.x, sh.W - t.w); t.y = Math.min(t.y, sh.H - t.h);
+  } else if (d.type === 'vertex'){
+    commitOnce(sh, d); t.pts[d.h] = [sn(ix, sh.W), sn(iy, sh.H)];
+  }
+  touch(sh);
+});
+
+function endPointer(e){
+  touches.delete(e.pointerId);
+  if (S.pinch){ if (touches.size < 2) S.pinch = null; return; }
+  const sh = cur(), d = S.drag; S.drag = null;
+  if (!sh || !d) return;
+  const [sx, sy] = local(e);
+  if (d.type === 'draw'){
+    const r = normRect(d.a, d.b);
+    if (e.type === 'pointercancel'){ schedule(); return; }
+    if (Math.hypot(sx - d.sx, sy - d.sy) < 4 || r.w < 1 || r.h < 1){
+      const [ix, iy] = toImg(sx, sy), hit = hitShape(ix, iy); S.sel = hit ? hit.id : null; schedule(true); return;
+    }
+    pushUndo(sh); const lab = ensureActiveLabel();
+    const shape = {id:nid('R'), type:'rect', label:lab.id, ...r};
+    sh.shapes.push(shape); S.sel = shape.id; touch(sh); return;
+  }
+  if (d.type === 'frame'){
+    const r = normRect(d.a, d.b);
+    if (e.type !== 'pointercancel' && r.w >= 8 && r.h >= 8){
+      pushUndo(sh, d.snap);
+      sh.frame = (r.x === 0 && r.y === 0 && r.w === sh.W && r.h === sh.H) ? null : r;
+      touch(sh); toast(`Frame set to ${r.w} × ${r.h}. Shares are now measured against this area.`);
+    } else schedule();
+    return;
+  }
+  const [ix, iy] = toImg(sx, sy); updateCursor(sx, sy, ix, iy); schedule(true);
+}
+cv.addEventListener('pointerup', endPointer);
+cv.addEventListener('pointercancel', endPointer);
+cv.addEventListener('pointerleave', () => { if (!S.drag){ S.mouse = null; schedule(); } });
+cv.addEventListener('dblclick', () => { if (S.tool === 'poly' && S.poly) closePoly(); });
+cv.addEventListener('wheel', e => {
+  e.preventDefault(); const [sx, sy] = local(e);
+  zoomAt(Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0015)), sx, sy);
+}, {passive:false});
+
+function updateCursor(sx, sy, ix, iy){
+  const sh = cur(); let c = 'default';
+  if (sh){
+    if (S.space) c = 'grab';
+    else {
+      const sel = selShape();
+      const h = sel && S.tool !== 'poly' && S.tool !== 'frame' ? hitHandle(sel, sx, sy) : null;
+      if (h !== null) c = typeof h === 'number' ? 'move' : ({n:'ns-resize', s:'ns-resize', e:'ew-resize', w:'ew-resize', ne:'nesw-resize', sw:'nesw-resize', nw:'nwse-resize', se:'nwse-resize'})[h];
+      else if (S.tool === 'move') c = hitShape(ix, iy) ? 'move' : 'grab';
+      else if (S.tool === 'rect' && sel && inside(sel, ix, iy)) c = 'move';
+      else c = 'crosshair';
+    }
+  }
+  cv.style.cursor = c;
+}
+
+function polyClick(ix, iy, sx, sy){
+  const sh = cur(), p = [sn(ix, sh.W), sn(iy, sh.H)];
+  if (!S.poly){ S.poly = {pts:[p]}; S.sel = null; schedule(true); return; }
+  const f = S.poly.pts[0], [fx, fy] = toScr(f[0], f[1]);
+  if (S.poly.pts.length >= 3 && Math.hypot(fx - sx, fy - sy) <= 9){ closePoly(); return; }
+  S.poly.pts.push(p); schedule();
+}
+function closePoly(){
+  const sh = cur(); if (!S.poly || !sh) return;
+  const pts = S.poly.pts.filter((p, i, a) => i === 0 || p[0] !== a[i - 1][0] || p[1] !== a[i - 1][1]);
+  if (pts.length > 1 && pts[pts.length - 1][0] === pts[0][0] && pts[pts.length - 1][1] === pts[0][1]) pts.pop();
+  S.poly = null;
+  if (pts.length < 3){ toast('A polygon needs at least 3 points.'); schedule(); return; }
+  pushUndo(sh); const lab = ensureActiveLabel();
+  const shape = {id:nid('P'), type:'poly', label:lab.id, pts};
+  sh.shapes.push(shape); S.sel = shape.id; touch(sh);
+}
+function setTool(t){
+  S.tool = t; if (t !== 'poly') S.poly = null;
+  for (const b of document.querySelectorAll('.seg [data-tool]')) b.setAttribute('aria-pressed', String(b.dataset.tool === t));
+  if (S.mouse) updateCursor(S.mouse.sx, S.mouse.sy, S.mouse.ix, S.mouse.iy);
+  schedule();
+}
+function deleteSel(){
+  const sh = cur(), s = selShape(); if (!s) return;
+  pushUndo(sh); sh.shapes = sh.shapes.filter(x => x !== s); S.sel = null; touch(sh);
+}
+function nudge(dx, dy){
+  const sh = cur(), t = selShape(); if (!t) return;
+  pushUndo(sh); const b = bbox(t);
+  dx = clamp(dx, -b.x, sh.W - b.x - b.w); dy = clamp(dy, -b.y, sh.H - b.y - b.h);
+  if (t.type === 'rect'){ t.x += dx; t.y += dy; } else t.pts = t.pts.map(([x, y]) => [x + dx, y + dy]);
+  touch(sh);
+}
+
+/* ---------------- keyboard ---------------- */
+const isField = t => t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+document.addEventListener('keydown', e => {
+  if (isField(e.target) || !$('copyPanel').hidden) return;
+  const k = e.key, mod = e.ctrlKey || e.metaKey;
+  if (mod && (k === 'z' || k === 'Z')){ e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  if (mod && (k === 'y' || k === 'Y')){ e.preventDefault(); redo(); return; }
+  if (mod || e.altKey) return;
+  const onButton = e.target && (e.target.tagName === 'BUTTON' || e.target.getAttribute('role') === 'button');
+  if (k === ' '){
+    if (onButton) return;
+    e.preventDefault(); if (!S.space){ S.space = true; cv.style.cursor = 'grab'; schedule(); } return;
+  }
+  const tools = {b:'rect', p:'poly', v:'move', f:'frame'};
+  const lk = k.length === 1 ? k.toLowerCase() : '';
+  if (tools[lk]){ setTool(tools[lk]); return; }
+  if (lk === 't'){ S.tags = !S.tags; $('tagsT').checked = S.tags; schedule(); return; }
+  if (k === 'Escape'){
+    if (S.poly) S.poly = null;
+    else if (S.drag){ const sh = cur(); if (S.drag.committed && sh) restore(sh, sh.undo.pop()); S.drag = null; }
+    else S.sel = null;
+    schedule(true); return;
+  }
+  if (k === 'Enter' && S.poly && !onButton){ e.preventDefault(); closePoly(); return; }
+  if (k === 'Backspace' && S.poly){ e.preventDefault(); S.poly.pts.pop(); if (!S.poly.pts.length) S.poly = null; schedule(); return; }
+  if ((k === 'Delete' || k === 'Backspace') && selShape()){ e.preventDefault(); deleteSel(); return; }
+  if (k.startsWith('Arrow') && selShape()){
+    e.preventDefault(); const st = e.shiftKey ? 10 : 1;
+    nudge(k === 'ArrowLeft' ? -st : k === 'ArrowRight' ? st : 0, k === 'ArrowUp' ? -st : k === 'ArrowDown' ? st : 0); return;
+  }
+  if (k === '0'){ fit(); return; }
+  if (k === '1'){ zoomAt(1 / S.view.s, CW / 2, (CH - STATUS_H) / 2); return; }
+  if (k === '+' || k === '='){ zoomAt(1.25, CW / 2, (CH - STATUS_H) / 2); return; }
+  if (k === '-' || k === '_'){ zoomAt(0.8, CW / 2, (CH - STATUS_H) / 2); return; }
+});
+document.addEventListener('keyup', e => { if (e.key === ' ' && S.space){ S.space = false; if (S.mouse) updateCursor(S.mouse.sx, S.mouse.sy, S.mouse.ix, S.mouse.iy); schedule(); } });
+window.addEventListener('blur', () => { S.space = false; });
+
+/* ---------------- loading screenshots ---------------- */
+let pasteN = 0;
+async function addFiles(list){
+  const files = [...list].filter(f => f && ((f.type || '').startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|avif)$/i.test(f.name || '')));
+  if (!files.length){ toast('Those files are not images. Load a PNG, JPG or WebP screenshot.'); return; }
+  const added = [];
+  for (const f of files){
+    const url = URL.createObjectURL(f), img = new Image(); img.src = url;
+    try { await img.decode(); }
+    catch (_) { URL.revokeObjectURL(url); toast(`Couldn't read ${f.name || 'that image'}. Save it as PNG or JPG and try again.`); continue; }
+    const s = makeShot(f.name || `Pasted screenshot ${++pasteN}`, img, img.naturalWidth, img.naturalHeight); s.url = url; added.push(s);
+  }
+  if (!added.length) return;
+  if (S.shots.length && S.shots.every(s => s.sample)){
+    S.shots = []; S.labels = S.labels.filter(l => !l.sample);
+    if (!S.labels.length) addLabel('Ad 1');
+    S.activeLabel = S.labels[0].id;
+  }
+  S.poly = null; S.sel = null;
+  S.shots.push(...added); S.cur = S.shots.length - added.length;
+  renderStrip(); fit();
+  toast(added.length > 1 ? `Loaded ${added.length} screenshots.` : `Loaded ${added[0].name} (${added[0].W} × ${added[0].H}).`);
+}
+const openPicker = () => $('file').click();
+$('openBtn').addEventListener('click', openPicker);
+$('exampleOpen').addEventListener('click', openPicker);
+$('emptyOpen').addEventListener('click', openPicker);
+$('file').addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; });
+document.addEventListener('paste', e => {
+  if (isField(e.target)) return;
+  const files = [...(e.clipboardData ? e.clipboardData.items : [])]
+    .filter(i => i.kind === 'file' && i.type.startsWith('image/')).map(i => i.getAsFile()).filter(Boolean);
+  if (!files.length) return;
+  e.preventDefault();
+  addFiles(files.map(f => new File([f], `Pasted screenshot ${++pasteN}.${(f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`, {type:f.type})));
+});
+let dragDepth = 0;
+window.addEventListener('dragenter', e => { if ([...(e.dataTransfer?.types || [])].includes('Files')){ dragDepth++; stage.classList.add('drop'); } });
+window.addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) stage.classList.remove('drop'); });
+window.addEventListener('dragover', e => { if ([...(e.dataTransfer?.types || [])].includes('Files')) e.preventDefault(); });
+window.addEventListener('drop', e => { if (!e.dataTransfer?.files?.length) return; e.preventDefault(); dragDepth = 0; stage.classList.remove('drop'); addFiles(e.dataTransfer.files); });
+
+function setShot(i){ if (i === S.cur) return; S.cur = i; S.sel = null; S.poly = null; S.drag = null; renderStrip(); fit(); }
+function removeShot(i){
+  const [s] = S.shots.splice(i, 1); if (s && s.url) URL.revokeObjectURL(s.url);
+  if (S.cur >= S.shots.length) S.cur = S.shots.length - 1;
+  else if (i < S.cur) S.cur--;
+  S.sel = null; S.poly = null; renderStrip(); fit();
+}
+
+/* ---------------- panel ---------------- */
+function renderStrip(){
+  $('strip').innerHTML = S.shots.map((s, i) => `<div class="shotw${i === S.cur ? ' on' : ''}">
+    <button type="button" class="shot" data-i="${i}" aria-current="${i === S.cur}" title="${esc(s.name)} (${s.W} × ${s.H})">
+      <img src="${s.thumb}" alt="">
+      <span class="meta"><span class="nm">${esc(s.sample ? 'Example frame' : s.name)}</span><span class="pc mono" data-pc="${s.id}"></span></span>
+      ${s.sample ? '<span class="badge">Example</span>' : ''}
+    </button>
+    <button type="button" class="x" data-rm="${i}" aria-label="Remove ${esc(s.name)}" title="Remove">×</button></div>`).join('')
+    + `<button type="button" class="shot add" id="stripAdd">+ Add screenshots</button>`;
+  updateStripPct();
+}
+function updateStripPct(){
+  for (const s of S.shots){ const el = document.querySelector(`[data-pc="${s.id}"]`); if (el){ const st = statsFor(s); el.textContent = fmtPct(st.total / st.fpx * 100); } }
+}
+$('strip').addEventListener('click', e => {
+  const rm = e.target.closest('[data-rm]'); if (rm){ removeShot(+rm.dataset.rm); return; }
+  if (e.target.closest('#stripAdd')){ openPicker(); return; }
+  const b = e.target.closest('[data-i]'); if (b) setShot(+b.dataset.i);
+});
+
+function gcd(a, b){ while (b){ [a, b] = [b, a % b]; } return a; }
+function formatName(w, h){
+  const known = {'1920x1080':'1080p HD','3840x2160':'4K UHD','1280x720':'720p HD','2560x1440':'1440p','4096x2160':'DCI 4K',
+    '7680x4320':'8K UHD','1080x1920':'Vertical 1080p','720x1280':'Vertical 720p','1080x1080':'Square','720x576':'PAL SD','720x480':'NTSC SD'};
+  const g = gcd(w, h); const ar = (w / g <= 32) ? `${w / g}:${h / g}` : `${(w / h).toFixed(2)}:1`;
+  return (known[`${w}x${h}`] ? known[`${w}x${h}`] + ' · ' : '') + ar;
+}
+
+function renderPanel(){
+  const sh = cur();
+  $('exampleNote').hidden = !(sh && sh.sample);
+  $('undoBtn').disabled = !sh || !sh.undo.length; $('redoBtn').disabled = !sh || !sh.redo.length;
+  $('copyBtn').disabled = !S.shots.length; $('csvBtn').disabled = !S.shots.length; $('pngBtn').disabled = !sh;
+  updateStripPct();
+  const st = sh ? statsFor(sh) : {f:{w:0, h:0}, fpx:1, perShape:new Map(), perLabel:new Map(), total:0};
+  const b = BASES[S.basis];
+  if (sh){
+    $('frameSize').textContent = `${st.f.w} × ${st.f.h}`;
+    $('frameFmt').textContent = formatName(st.f.w, st.f.h);
+    $('framePx').textContent = fmtInt(st.fpx);
+    $('frameNote').textContent = sh.frame
+      ? `Measuring against the frame region at (${sh.frame.x}, ${sh.frame.y}) inside the ${sh.W} × ${sh.H} screenshot. Ad area outside it is not counted.`
+      : 'Measuring against the whole screenshot. If it also shows player controls or desktop, use Frame (F) to mark just the picture.';
+  } else {
+    $('frameSize').textContent = '—'; $('frameFmt').textContent = '—'; $('framePx').textContent = '—';
+    $('frameNote').textContent = 'Load a screenshot to start.';
+  }
+  $('frameReset').hidden = !(sh && sh.frame);
+  const pct = st.total / st.fpx * 100;
+  $('totPct').textContent = pctStr(pct);
+  $('totBar').style.width = Math.min(100, pct).toFixed(2) + '%';
+  $('totPx').textContent = b
+    ? `${fmtInt(disp(st.total, st))} of ${fmtInt(b[0] * b[1])} px at ${b[0]} × ${b[1]} (${fmtInt(st.total)} px in the screenshot)`
+    : `${fmtInt(st.total)} of ${sh ? fmtInt(st.fpx) : 0} px`;
+  let sum = 0; for (const v of st.perShape.values()) sum += v;
+  const over = sum - st.total;
+  $('overlapNote').hidden = over <= 0;
+  if (over > 0) $('overlapNote').textContent = `${fmtInt(disp(over, st))} px are covered by more than one shape and are counted once in the total.`;
+
+  if (S.renaming === null) renderLabels(st);
+  renderSel(sh, st);
+  renderShapes(sh, st);
+}
+function renderLabels(st){
+  const used = new Set(); for (const s of S.shots) for (const x of s.shapes) used.add(x.label);
+  let max = 0; for (const l of S.labels){ const p = st.perLabel.get(l.id); if (p && p.px > max) max = p.px; }
+  $('labels').innerHTML = S.labels.map(l => {
+    const p = st.perLabel.get(l.id), px = p ? p.px : 0, n = p ? p.n : 0, on = l.id === S.activeLabel;
+    return `<div class="lrow${on ? ' on' : ''}" data-id="${l.id}" role="button" tabindex="0" aria-pressed="${on}" title="New shapes go to ${esc(l.name)}. Double-click to rename.">
+      <span class="sw" style="--c:${l.color}"></span><span class="ln">${esc(l.name)}</span>
+      <span class="lp mono">${fmtInt(disp(px, st))}</span><span class="lpc mono">${fmtPct(px / st.fpx * 100)}</span>
+      ${used.has(l.id) ? '<span></span>' : `<button type="button" class="del" data-del="${l.id}" aria-label="Delete ${esc(l.name)}" title="Delete sponsor">×</button>`}
+      <span class="lbar"><i style="width:${max ? (px / max * 100).toFixed(1) : 0}%;--c:${l.color}"></i></span>
+      <span class="lc">${n} shape${n === 1 ? '' : 's'}</span></div>`;
+  }).join('') || '<p class="note">No sponsors yet. Add one below.</p>';
+}
+function renderSel(sh, st){
+  const s = selShape(); $('secSel').hidden = !s; if (!s) return;
+  const sel = $('selLabel'), sig = S.labels.map(l => l.id + ':' + l.name).join('|');
+  if (sel.dataset.sig !== sig){ sel.innerHTML = S.labels.map(l => `<option value="${l.id}">${esc(l.name)}</option>`).join(''); sel.dataset.sig = sig; }
+  if (document.activeElement !== sel) sel.value = s.label;
+  $('selRect').hidden = s.type !== 'rect'; $('selPoly').hidden = s.type !== 'poly';
+  if (s.type === 'rect') for (const k of ['x', 'y', 'w', 'h']){ const inp = $('sel' + k.toUpperCase()); if (document.activeElement !== inp) inp.value = s[k]; }
+  else $('selPoly').textContent = `Polygon with ${s.pts.length} points. Drag a point with the Box or Move tool to adjust it.`;
+  const px = st.perShape.get(s.id) || 0;
+  $('selStats').textContent = `${fmtInt(disp(px, st))} px · ${fmtPct(px / st.fpx * 100)} of frame`;
+}
+function renderShapes(sh, st){
+  if (!sh){ $('shapes').innerHTML = '<li class="empty-li">Load a screenshot first.</li>'; return; }
+  $('shapes').innerHTML = sh.shapes.length ? sh.shapes.map(s => {
+    const l = labelById(s.label), px = st.perShape.get(s.id) || 0;
+    const geo = s.type === 'rect' ? `${s.w} × ${s.h}` : `${s.pts.length}-point polygon`;
+    return `<li><button type="button" data-id="${s.id}" class="${s.id === S.sel ? 'on' : ''}" aria-pressed="${s.id === S.sel}">
+      <span class="sw" style="--c:${l.color}"></span><span class="sn">${esc(l.name)}</span><span class="sg mono">${geo}</span><span class="sp mono">${fmtPct(px / st.fpx * 100)}</span></button></li>`;
+  }).join('') : '<li class="empty-li">No shapes yet. Pick a sponsor above, then drag a box around the ad.</li>';
+}
+
+$('labels').addEventListener('click', e => {
+  const del = e.target.closest('[data-del]');
+  if (del){
+    S.labels = S.labels.filter(l => l.id !== del.dataset.del);
+    if (S.activeLabel === del.dataset.del) S.activeLabel = S.labels[0] ? S.labels[0].id : null;
+    schedule(true); return;
+  }
+  const row = e.target.closest('.lrow'); if (row && S.renaming === null){ S.activeLabel = row.dataset.id; schedule(true); }
+});
+$('labels').addEventListener('keydown', e => {
+  const row = e.target.closest('.lrow'); if (!row || e.target !== row) return;
+  if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); S.activeLabel = row.dataset.id; schedule(true); }
+  if (e.key === 'F2') startRename(row);
+});
+$('labels').addEventListener('dblclick', e => { const row = e.target.closest('.lrow'); if (row && !e.target.closest('.del')) startRename(row); });
+function startRename(row){
+  const l = S.labels.find(x => x.id === row.dataset.id); if (!l) return;
+  S.renaming = l.id;
+  const span = row.querySelector('.ln'); span.innerHTML = '';
+  const inp = document.createElement('input'); inp.id = 'renameInput'; inp.value = l.name; inp.setAttribute('aria-label', 'Sponsor name');
+  span.append(inp); inp.focus(); inp.select();
+  let done = false;
+  const finish = save => {
+    if (done) return; done = true;
+    const v = inp.value.trim(); if (save && v) l.name = v;
+    S.renaming = null; schedule(true);
+  };
+  inp.addEventListener('keydown', ev => { ev.stopPropagation(); if (ev.key === 'Enter') finish(true); if (ev.key === 'Escape') finish(false); });
+  inp.addEventListener('blur', () => finish(true));
+  inp.addEventListener('click', ev => ev.stopPropagation());
+}
+$('addLabelForm').addEventListener('submit', e => {
+  e.preventDefault(); const v = $('addLabel').value.trim(); if (!v) return;
+  const ex = S.labels.find(l => l.name.toLowerCase() === v.toLowerCase());
+  S.activeLabel = (ex || addLabel(v)).id; $('addLabel').value = '';
+  toast(ex ? `${ex.name} already exists and is now selected.` : `Added ${v}. New shapes go to it.`);
+  schedule(true);
+});
+$('shapes').addEventListener('click', e => { const b = e.target.closest('[data-id]'); if (b){ S.sel = b.dataset.id; S.poly = null; schedule(true); } });
+$('selLabel').addEventListener('change', e => { const sh = cur(), s = selShape(); if (!s) return; pushUndo(sh); s.label = e.target.value; touch(sh); });
+for (const k of ['x', 'y', 'w', 'h']) $('sel' + k.toUpperCase()).addEventListener('change', e => {
+  const sh = cur(), s = selShape(); if (!s || s.type !== 'rect') return;
+  let v = Math.round(Number(e.target.value)); if (!Number.isFinite(v)){ e.target.value = s[k]; return; }
+  pushUndo(sh);
+  if (k === 'x') s.x = clamp(v, 0, sh.W - s.w);
+  if (k === 'y') s.y = clamp(v, 0, sh.H - s.h);
+  if (k === 'w') s.w = clamp(v, 1, sh.W - s.x);
+  if (k === 'h') s.h = clamp(v, 1, sh.H - s.y);
+  e.target.value = s[k]; touch(sh);
+});
+$('selDelete').addEventListener('click', deleteSel);
+$('frameReset').addEventListener('click', () => { const sh = cur(); if (!sh || !sh.frame) return; pushUndo(sh); sh.frame = null; touch(sh); });
+$('basis').addEventListener('change', e => { S.basis = e.target.value; schedule(true); });
+$('tagsT').addEventListener('change', e => { S.tags = e.target.checked; schedule(); });
+for (const b of document.querySelectorAll('.seg [data-tool]')) b.addEventListener('click', () => setTool(b.dataset.tool));
+$('undoBtn').addEventListener('click', undo);
+$('redoBtn').addEventListener('click', redo);
+$('zoomIn').addEventListener('click', () => zoomAt(1.25, CW / 2, (CH - STATUS_H) / 2));
+$('zoomOut').addEventListener('click', () => zoomAt(0.8, CW / 2, (CH - STATUS_H) / 2));
+$('zoomFit').addEventListener('click', fit);
+$('zoomPct').addEventListener('click', () => zoomAt(1 / S.view.s, CW / 2, (CH - STATUS_H) / 2));
+
+/* ---------------- export ---------------- */
+function reportRows(){
+  const b = BASES[S.basis];
+  const head = ['Screenshot', 'Sponsor', 'Shapes', 'Pixels', 'Share of screen (%)', 'Frame width', 'Frame height', 'Frame pixels'];
+  if (b) head.push(`Pixels at ${b[0]}x${b[1]}`);
+  const rows = [head];
+  for (const sh of S.shots){
+    const st = statsFor(sh), name = sh.sample ? 'Example frame (sample data)' : sh.name;
+    const line = (sp, n, px) => { const r = [name, sp, n, px, (px / st.fpx * 100).toFixed(4), st.f.w, st.f.h, st.fpx]; if (b) r.push(Math.round(px / st.fpx * b[0] * b[1])); rows.push(r); };
+    for (const [lid, p] of st.perLabel) line(labelById(lid).name, p.n, p.px);
+    line('All ads (overlaps counted once)', sh.shapes.length, st.total);
+  }
+  return rows;
+}
+const toCSV = rows => rows.map(r => r.map(v => { const s = String(v); return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(',')).join('\r\n') + '\r\n';
+const toTSV = rows => rows.map(r => r.map(v => String(v).replace(/[\t\r\n]+/g, ' ')).join('\t')).join('\n');
+const baseName = n => (n.replace(/\.[a-z0-9]+$/i, '').replace(/[^\w\- ]+/g, '').trim() || 'screenshot').replace(/\s+/g, '_');
+const stamp = () => { const d = new Date(), p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
+
+// Inside the claude.ai viewer, files go through the downloads capability; opened as a local file, a plain link works.
+async function saveFile(filename, data, mime){
+  if (window.claude && typeof window.claude.use === 'function'){
+    let api = null; try { api = await window.claude.use('downloads'); } catch (_) {}
+    if (!api){ toast('Downloads are not available in this view. Use Copy table instead.'); return; }
+    try { const r = await api.save({filename, data}); if (r && r.status === 'saved') toast(`Saved ${filename}.`); }
+    catch (err) {
+      const c = err && err.code;
+      toast(c === 'declined' ? 'Download cancelled.' : c === 'rate_limited' ? 'A save prompt is already open. Finish it, then try again.'
+        : c === 'too_large' ? 'That file is too large to save here.' : 'Downloads are not available in this view. Use Copy table instead.');
+    }
+    return;
+  }
+  const blob = data instanceof Blob ? data : new Blob([data], {type:mime});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename;
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+$('copyBtn').addEventListener('click', () => {
+  const rows = reportRows(), tsv = toTSV(rows);
+  const fallback = () => { $('copyText').value = tsv; $('copyPanel').hidden = false; $('copyText').focus(); $('copyText').select(); };
+  let p; try { p = navigator.clipboard && navigator.clipboard.writeText(tsv); } catch (_) { p = null; }
+  if (!p){ fallback(); return; }
+  p.then(() => toast(`Copied ${rows.length - 1} rows. Paste them into Sheets or Excel.`), fallback);
+});
+$('copyClose').addEventListener('click', () => { $('copyPanel').hidden = true; });
+$('copyPanel').addEventListener('keydown', e => { if (e.key === 'Escape') $('copyPanel').hidden = true; });
+$('csvBtn').addEventListener('click', () => {
+  const real = S.shots.filter(s => !s.sample);
+  const name = real.length === 1 ? `${baseName(real[0].name)}_exposure.csv` : `ad_exposure_${stamp()}.csv`;
+  saveFile(name, toCSV(reportRows()), 'text/csv');
+});
+$('pngBtn').addEventListener('click', async () => {
+  const sh = cur(); if (!sh) return;
+  const c = document.createElement('canvas'); c.width = sh.W; c.height = sh.H;
+  const x = c.getContext('2d'); x.drawImage(sh.src, 0, 0, sh.W, sh.H);
+  const st = statsFor(sh), k = Math.max(1, Math.min(sh.W, sh.H) / 720);
+  paintOverlay(x, sh, st, {s:1, ox:0, oy:0, lw:2 * k, k, font:Math.round(15 * k), sel:null, tags:true});
+  const f = st.f, fs = Math.round(16 * k);
+  x.font = `600 ${fs}px "IBM Plex Sans", system-ui, sans-serif`;
+  const txt = `All ads ${fmtPct(st.total / st.fpx * 100)} of ${f.w} × ${f.h} · ${fmtInt(st.total)} px`;
+  const w = x.measureText(txt).width + fs, h = Math.round(fs * 1.7);
+  x.fillStyle = 'rgba(8,10,13,.82)'; x.fillRect(f.x + f.w - w - 10 * k, f.y + f.h - h - 10 * k, w, h);
+  x.fillStyle = '#ffffff'; x.textBaseline = 'middle'; x.textAlign = 'left'; x.fillText(txt, f.x + f.w - w - 10 * k + fs / 2, f.y + f.h - h / 2 - 10 * k + .5);
+  const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+  if (!blob){ toast('Could not render the PNG. Try a smaller screenshot.'); return; }
+  saveFile(`${baseName(sh.sample ? 'example_frame' : sh.name)}_exposure.png`, blob, 'image/png');
+});
+
+let toastT = 0;
+function toast(msg){ const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 3200); }
+
+/* ---------------- example frame ---------------- */
+function makeSample(){
+  const W = 1920, H = 1080, c = document.createElement('canvas'); c.width = W; c.height = H;
+  const x = c.getContext('2d'); let seed = 20261119;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const COND = '"IBM Plex Sans Condensed", "Arial Narrow", sans-serif';
+  let g = x.createLinearGradient(0, 0, 0, 430); g.addColorStop(0, '#13161c'); g.addColorStop(1, '#262b33');
+  x.fillStyle = g; x.fillRect(0, 0, W, 430);
+  const hues = [8, 205, 35, 0, 220, 130];
+  for (let i = 0; i < 3400; i++){
+    x.fillStyle = `hsl(${hues[i % 6]} ${15 + rnd() * 35}% ${20 + rnd() * 38}%)`;
+    x.beginPath(); x.ellipse(rnd() * W, 6 + rnd() * 288, 4 + rnd() * 3, 5 + rnd() * 4, 0, 0, Math.PI * 2); x.fill();
+  }
+  x.fillStyle = '#05070a'; x.fillRect(0, 300, W, 96);
+  x.fillStyle = '#0d1118'; x.fillRect(0, 318, 400, 60); x.fillRect(1520, 318, 400, 60);
+  x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.font = `600 26px ${COND}`; x.fillStyle = '#5d6878';
+  x.fillText('HARBOR CITY ARENA', 200, 349); x.fillText('SECTION 112 · 113', 1720, 349);
+  g = x.createLinearGradient(420, 0, 1500, 0); g.addColorStop(0, '#0b2a63'); g.addColorStop(.5, '#1a4fb4'); g.addColorStop(1, '#0b2a63');
+  x.fillStyle = g; x.fillRect(420, 318, 1080, 60);
+  x.fillStyle = '#ffffff'; x.font = `700 44px ${COND}`; x.fillText('NORTHWIND AIR', 960, 350);
+  x.fillStyle = '#8fc1ff'; x.font = `700 40px ${COND}`; x.fillText('› › ›', 640, 348); x.fillText('‹ ‹ ‹', 1280, 348);
+  x.fillStyle = '#c28a52'; x.fillRect(0, 396, W, H - 396);
+  x.strokeStyle = 'rgba(96,56,22,.28)'; x.lineWidth = 2;
+  for (let i = -44; i <= 44; i++){ x.beginPath(); x.moveTo(960 + i * 24, 396); x.lineTo(960 + i * 118, H); x.stroke(); }
+  x.strokeStyle = '#f4efe6'; x.lineWidth = 6;
+  x.beginPath(); x.moveTo(0, 452); x.lineTo(W, 452); x.stroke();
+  x.beginPath(); x.moveTo(960, 452); x.lineTo(960, H); x.stroke();
+  x.beginPath(); x.ellipse(960, 800, 330, 118, 0, 0, Math.PI * 2); x.stroke();
+  x.fillStyle = '#d9542b'; x.beginPath(); x.ellipse(960, 800, 250, 88, 0, 0, Math.PI * 2); x.fill();
+  x.save(); x.translate(960, 802); x.scale(1, .6); x.fillStyle = '#ffffff'; x.font = `700 62px ${COND}`; x.fillText('KESTREL ENERGY', 0, 0); x.restore();
+  x.fillStyle = '#2b2f36'; x.fillRect(1660, 420, 20, 100);
+  x.fillStyle = '#10274f'; x.fillRect(1600, 520, 140, 190);
+  x.fillStyle = '#ffffff'; x.font = `700 32px ${COND}`; x.fillText('NORTH', 1670, 588); x.fillText('WIND', 1670, 624);
+  x.fillStyle = '#8fc1ff'; x.font = `600 22px ${COND}`; x.fillText('AIR', 1670, 660);
+  x.fillStyle = '#0c1016'; x.fillRect(48, 936, 520, 56);
+  x.textAlign = 'left'; x.font = '600 26px "IBM Plex Mono", Consolas, monospace';
+  x.fillStyle = '#ffffff'; x.fillText('HAR 54   PEL 51', 68, 965); x.fillStyle = '#ffd23f'; x.fillText('Q3 4:12', 418, 965);
+  x.fillStyle = '#eef1f5'; x.fillRect(48, 992, 520, 36);
+  x.fillStyle = '#10274f'; x.font = '600 20px "IBM Plex Sans", Arial, sans-serif'; x.fillText('presented by HALCYON BANK', 68, 1011);
+  x.textAlign = 'right'; x.font = '500 22px "IBM Plex Mono", Consolas, monospace'; x.fillStyle = 'rgba(255,255,255,.55)';
+  x.fillText('EXAMPLE FRAME · 1920×1080', W - 36, 40);
+  return c;
+}
+const ellipsePts = (cx, cy, rx, ry, n) => Array.from({length:n}, (_, i) => { const a = i / n * Math.PI * 2; return [Math.round(cx + rx * Math.cos(a)), Math.round(cy + ry * Math.sin(a))]; });
+
+async function init(){
+  try { await Promise.race([Promise.all([document.fonts.load(`700 44px "IBM Plex Sans Condensed"`), document.fonts.load(`600 20px "IBM Plex Sans"`)]), new Promise(r => setTimeout(r, 1500))]); } catch (_) {}
+  const sh = makeShot('Example frame', makeSample(), 1920, 1080, true);
+  const nw = addLabel('Northwind Air'), ke = addLabel('Kestrel Energy'), ha = addLabel('Halcyon Bank');
+  for (const l of [nw, ke, ha]) l.sample = true;
+  sh.shapes.push(
+    {id:nid('R'), type:'rect', label:nw.id, x:420, y:318, w:1080, h:60},
+    {id:nid('R'), type:'rect', label:nw.id, x:1600, y:520, w:140, h:190},
+    {id:nid('P'), type:'poly', label:ke.id, pts:ellipsePts(960, 800, 250, 88, 20)},
+    {id:nid('R'), type:'rect', label:ha.id, x:48, y:992, w:520, h:36}
+  );
+  if (!S.shots.length){ S.shots.push(sh); S.cur = 0; S.activeLabel = nw.id; renderStrip(); fit(); }
+  if (window.claude && typeof window.claude.use === 'function'){
+    window.claude.use('downloads').then(api => { if (!api){ $('csvBtn').hidden = true; $('pngBtn').hidden = true; } }, () => {});
+  }
+}
+schedule(true);
+init();
+})();
+</script>
+</body></html>
